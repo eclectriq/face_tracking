@@ -27,6 +27,7 @@ python3 detect.py \
 
 """
 import argparse
+from enum import Enum
 import collections
 import common
 import cv2
@@ -42,6 +43,15 @@ import time
 import _thread
 import RPi.GPIO as GPIO
 
+TARGET_ACQUIRED = 'target-acquired.mp3'
+
+sound_last_play = {}
+
+def play_sound(s):
+    if s not in sound_last_play or (s in sound_last_play and (datetime.datetime.now() - sound_last_play[s]).seconds > 1):
+        os.system('nohup nvlc ' + s + ' --play-and-exit > /dev/null 2>&1 &')
+        sound_last_play[s] = datetime.datetime.now()
+
 global RUNNING
 RUNNING = True
 SERVO_PIN = 40 #33 #12
@@ -56,36 +66,21 @@ def ledOn():
 def ledOff():
     GPIO.output(LED_PIN, GPIO.LOW)
 
-def stepTowardTarget(servo, servoData, targetCoordinates, frameH, frameW):
-    halfFrameW = frameW / 2
-    targetX, targetY = targetCoordinates
-    #print(datetime.datetime.now())
-    servoStep = servoData['sweepStepTracking']
-    if halfFrameW - 25 <= targetX <= halfFrameW + 25:
-        stopped = True
-    elif targetX > halfFrameW + 25:
-        ServoControls.rotateTo(servo, servoData, servoData['angle'] - servoStep)
-    else:
-        ServoControls.rotateTo(servo, servoData, servoData['angle'] + servoStep)
-        servoData['angle'] = servoData['angle'] + servoStep
-    if servoData['angle'] > servoData['maxAngle']:
-        servoData['angle'] = servoData['maxAngle']
-    elif servoData['angle'] < servoData['minAngle']:
-        servoData['angle'] = servoData['minAngle']
-    time.sleep(0.034)
-    #print(servoData['angle'])
-
-
 def control_servo(servo, servoData):
     time.sleep(1)
     while RUNNING:
         if servoData['targetCoordinates'] != [-1,-1]:
-            stepTowardTarget(servo, servoData, servoData['targetCoordinates'], 480, 640) #TODO: Read from cv2
+            ServoControls.step_toward_target(servo, servoData, servoData['targetCoordinates'], 480, 640) #TODO: Read from cv2
         else:
             ServoControls.sweep(servo, servoData)
             time.sleep(0.01)
 
 Object = collections.namedtuple('Object', ['id', 'score', 'bbox'])
+class TargetState(Enum):
+    UNKNOWN = 1
+    ACQUIRED = 2
+    TRACKING = 3
+    LOST = 4
 
 def load_labels(path):
     p = re.compile(r'\s*(\d+)(.+)')
@@ -133,13 +128,13 @@ def main():
     parser.add_argument('--camera_idx', help='Index of which video source to use. ', default = 0)
     parser.add_argument('--threshold', type=float, default=0.5,
                         help='classifier score threshold')
-    parser.add_argument('--minAngle', type=float, default=0.0, help='minimum angle for sweep')
-    parser.add_argument('--maxAngle', type=float, default=180.0, help='maximum angle for sweep')
+    parser.add_argument('--min_angle', type=float, default=0.0, help='minimum angle for sweep')
+    parser.add_argument('--max_angle', type=float, default=180.0, help='maximum angle for sweep')
     
     args = parser.parse_args()
     
     print('Initializing servo')
-    servo, servoData = ServoControls.init(0, sweepStepTracking = 0.5, minAngle = args.minAngle, maxAngle = args.maxAngle) #SERVO_PIN, 50)
+    servo, servoData = ServoControls.init(0, sweepStepTracking = 0.1, minAngle = args.min_angle, maxAngle = args.max_angle) #SERVO_PIN, 50)
     servoThread = _thread.start_new_thread(control_servo, (servo,servoData))
 
     print('Loading {} with {} labels.'.format(args.model, args.labels))
@@ -155,6 +150,12 @@ def main():
     if frame is None:
             raise Exception('Image not found!')
     frameH, frameW, frameChannels = frame.shape
+    
+    lastTargetLost = None
+    lastTargetLostTime = datetime.datetime.now()
+    targetState = TargetState.UNKNOWN
+    
+    play_sound('searching.mp3')
 
     while cap.isOpened():
         ret, frame = cap.read()
@@ -177,23 +178,32 @@ def main():
         face = next(filter(lambda a: a.id == 0, objs), None)
         
         if face != None:
+            if targetState == TargetState.UNKNOWN:
+                targetState = TargetState.ACQUIRED
             height, width, channels = cv2_im.shape
             
             x0, y0, x1, y1 = list(face.bbox)
             x0, y0, x1, y1 = int(x0*width), int(y0*height), int(x1*width), int(y1*height)
     
+            lastTargetLost = 0
             servoData['targetCoordinates'] = [round(abs((x0+(x1))/2)), round(abs((y0+(y1))/2))]
         else:
-            servoData['targetCoordinates'] = [-1,-1]
-
-        # 495 68 638 253
-        #print(cv2_im[0][495:638])
-        #print(len(cv2_im[0]))
-        #print("****")
-        # cv2_im = cv2_im[68 : 253]
-        #cv2_im = cv2_im[68:253, 495:638]
-        #frame[y:y+h, x:x+w] 
-  
+            # target may have been lost
+            if targetState == TargetState.TRACKING:
+                targetState = TargetState.LOST
+                # track lost time
+                lastTargetLostTime = datetime.datetime.now()
+            if targetState == TargetState.LOST and (lastTargetLostTime == None or (datetime.datetime.now() - lastTargetLostTime).seconds > 2):
+                # if lost for over a second, reset targetState back to default
+                servoData['targetCoordinates'] = [-1,-1]
+                play_sound('are-still-there.mp3')
+                targetState = TargetState.UNKNOWN
+                lastTargetLostTime = None
+            
+        if targetState == TargetState.ACQUIRED:
+            play_sound(TARGET_ACQUIRED)
+            targetState = TargetState.TRACKING
+        
         cv2.imshow('frame', cv2_im)
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
