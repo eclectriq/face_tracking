@@ -4,6 +4,7 @@ import argparse
 from enum import Enum
 from sound_controls import play_sound
 import pan_servo as pan_controls
+import tilt_servo as tilt_controls
 import yaml
 import collections
 import common
@@ -22,8 +23,8 @@ import RPi.GPIO as GPIO
 
 TARGET_ACQUIRED = 'target-acquired.mp3'
 
-global RUNNING
-RUNNING = True
+global SHARED_STATE
+SHARED_STATE = {"running" : True}
 SERVO_PIN = 40 #33 #12
 LED_PIN = 17
 
@@ -36,14 +37,17 @@ def ledOn():
 def ledOff():
     GPIO.output(LED_PIN, GPIO.LOW)
 
-def control_servo(servo, servo_data, target_fn):
+def control_servo(servo, servo_data, target_data, target_fn, on_stop_fn = None):
     time.sleep(1)
-    while RUNNING:
-        if servo_data['target_coordinates'] != [-1,-1]:
-            target_fn(servo, servo_data, servo_data['target_coordinates'], 480, 640) #TODO: Read from cv2
+    while SHARED_STATE['running']:
+        if target_data['target_coordinates'] != [-1,-1]:
+            target_fn(servo, servo_data, target_data['target_coordinates'], 480, 640) #TODO: Read from cv2
         else:
             servo_controls.sweep_step(servo, servo_data)
-            time.sleep(0.01)
+    if on_stop_fn != None:
+        _, sd = on_stop_fn(servo, servo_data)
+        print(str(sd['shutdown_angle']) + " " + sd['name'])
+    print('No longer running servo {}'.format(servo_data['name']))
 
 Object = collections.namedtuple('Object', ['id', 'score', 'bbox'])
 class TargetState(Enum):
@@ -84,7 +88,9 @@ def get_output(interpreter, score_threshold, top_k, image_scale=1.0):
     return [make(i) for i in range(top_k) if scores[i] >= score_threshold]
 
 def init_servo(name, config):
-    servo, servoData = servo_controls.init(0, **config)
+    print('Initializing servo {} with config {}'.format(name, config))
+    servo, servo_data = servo_controls.init(name, **config)
+    return (servo, servo_data)
 
 def main():
     default_model_dir = './'
@@ -100,26 +106,34 @@ def main():
     
     args = parser.parse_args()
 
-    with open("config.yaml", 'r') as stream:
-    try:
-        config = yaml.safe_load(stream)
-        ## DEFAULTS## ## TODO: Externalize defauls in separate YAML and merge
-        config['threshold'] = config.get('threshold', 0.5)
-        config['camera'] = config.get('camera', {})
-        config['camera']['index'] = config.get('index', 0)
-    except yaml.YAMLError as exc:
-        print("Unable to read YAML")
-        print(exc)
-
+    with open('config.yaml', 'r') as stream:
+        try:
+            print('loading configuration')
+            config = yaml.safe_load(stream)
+            ## DEFAULTS## ## TODO: Externalize defauls in separate YAML and merge
+            config['threshold'] = config.get('threshold', 0.5)
+            config['camera'] = config.get('camera', {})
+            config['camera']['index'] = config.get('index', 0)
+        except yaml.YAMLError as exc:
+            print('Unable to read YAML')
+            print(exc)
+    
+    target_data = {'target_coordinates': [-1,-1]}
+    
     print('Initializing servos')
     if 'pan' in config:
         print('Initializing pan servo')
         pan_servo, pan_servo_data = init_servo('pan', config['pan'])
-        pan_servo_thread = _thread.start_new_thread(control_servo, (pan_servo, pan_servo_data, pan_controls.step_toward_target))
+        pan_servo_thread = _thread.start_new_thread(control_servo,
+                                                    (pan_servo, pan_servo_data, target_data, pan_controls.step_toward_target,
+                                                     lambda servo, servo_data:
+                                                         servo_controls.rotate_to(servo, servo_data, servo_data['shutdown_angle'])))
     if 'tilt' in config:
         print('Initializing tilt servo')
         tilt_servo, tilt_servo_data = init_servo('tilt', config['tilt'])
-        tilt_servo_thread = _thread.start_new_thread(control_servo, (tilt_servo, tilt_servo_data, tilt_controls.step_toward_target))
+        tilt_servo_thread = _thread.start_new_thread(control_servo,
+                                                     (tilt_servo, tilt_servo_data, target_data, tilt_controls.step_toward_target,
+                                                      lambda servo, servo_data: servo_controls.rotate_to(servo, servo_data, servo_data['shutdown_angle'])))
     print('Servos initialized')
 
     print('Loading {} with {} labels.'.format(args.model, args.labels))
@@ -143,13 +157,16 @@ def main():
     targetState = TargetState.UNKNOWN
     
     play_sound('searching.mp3')
+    
+    print('Starting video loop')
 
     while cap.isOpened():
         ret, frame = cap.read()
         if not ret:
             break
-        #frame = cv2.flip(frame, flipCode=1)
-        frame = imutils.rotate(frame, 90)
+        # TODO: Use config orientation
+        frame = cv2.flip(frame, flipCode=-1)
+        #frame = imutils.rotate(frame, 90)
         h, w, layers = frame.shape
         aspect_ratio = w / h    
         cv2_im = frame # cv2.resize(frame, (1920, 1080))
@@ -173,7 +190,7 @@ def main():
             x0, y0, x1, y1 = int(x0*width), int(y0*height), int(x1*width), int(y1*height)
     
             lastTargetLost = 0
-            servoData['target_coordinates'] = [round(abs((x0+(x1))/2)), round(abs((y0+(y1))/2))]
+            target_data['target_coordinates'] = [round(abs((x0+(x1))/2)), round(abs((y0+(y1))/2))]
         else:
             # target may have been lost
             if targetState == TargetState.TRACKING:
@@ -182,7 +199,7 @@ def main():
                 lastTargetLostTime = datetime.datetime.now()
             if targetState == TargetState.LOST and (lastTargetLostTime == None or (datetime.datetime.now() - lastTargetLostTime).seconds > 2):
                 # if lost for over a second, reset targetState back to default
-                servoData['target_coordinates'] = [-1,-1]
+                target_data['target_coordinates'] = [-1,-1]
                 play_sound('are-still-there.mp3')
                 targetState = TargetState.UNKNOWN
                 lastTargetLostTime = None
@@ -195,9 +212,12 @@ def main():
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
-    RUNNING = False
+    print('Shutting down')
+    SHARED_STATE['running'] = False
+    time.sleep(5)
     cap.release()
     cv2.destroyAllWindows()
+    print('Goodybe')
 
 def append_objs_to_img(cv2_im, objs, labels):
     height, width, channels = cv2_im.shape

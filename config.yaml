@@ -11,6 +11,9 @@ pan:
   channel: 0
   max_angle: 130
   min_angle: 10
+  angle: 60
+  # angle to rotate to upon shutting down
+  shutdown_angle: 60
   # time to sleep when at the end of a sweep (at min angle and max angle)
   sweep_complete_sleep: 1
   # how much to step during sweep loop
@@ -19,13 +22,18 @@ pan:
   sweep_sleep: 0.001
   # how much to step during tracking loop
   sweep_tracking_step: 0.1
+  # how much time to sleep in between tracking seps
+  sweep_tracking_sleep: 0.01
 tilt:
   channel: 4
-  max_angle: 90
-  min_angle: 10
+  angle: 150
+  shutdown_angle: 180
+  max_angle: 180
+  min_angle: 150
   sweep_complete_sleep: 0.5
   sweep_step: 0.5
   sweep_sleep: 0.001
+  sweep_tracking_sleep: 0.001
 sounds:
   searching: "searching.mp3"
   acquired: "target-acquired.mp3"
