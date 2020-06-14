@@ -45,8 +45,7 @@ def control_servo(servo, servo_data, target_data, target_fn, on_stop_fn = None):
         else:
             servo_controls.sweep_step(servo, servo_data)
     if on_stop_fn != None:
-        _, sd = on_stop_fn(servo, servo_data)
-        print(str(sd['shutdown_angle']) + " " + sd['name'])
+        on_stop_fn(servo, servo_data)
     print('No longer running servo {}'.format(servo_data['name']))
 
 Object = collections.namedtuple('Object', ['id', 'score', 'bbox'])
