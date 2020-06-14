@@ -1,0 +1,32 @@
+cv_models: 
+  face_detection:
+    labels: coco_labels.txt
+    model: mobilenet_ssd_v2_coco_quant_postprocess_edgetpu.tflite
+    threshold: 0.5
+camera:
+  index: 0
+  # orientation of the camera, 0 normal, -1 flip horizontal, 1 flip vertical
+  orientation: 0
+pan:
+  channel: 0
+  max_angle: 130
+  min_angle: 10
+  # time to sleep when at the end of a sweep (at min angle and max angle)
+  sweep_complete_sleep: 1
+  # how much to step during sweep loop
+  sweep_step: 0.5
+  # how long to sleep when doing a step
+  sweep_sleep: 0.001
+  # how much to step during tracking loop
+  sweep_tracking_step: 0.1
+tilt:
+  channel: 4
+  max_angle: 90
+  min_angle: 10
+  sweep_complete_sleep: 0.5
+  sweep_step: 0.5
+  sweep_sleep: 0.001
+sounds:
+  searching: "searching.mp3"
+  acquired: "target-acquired.mp3"
+  lost: "are-still-there.mp3"

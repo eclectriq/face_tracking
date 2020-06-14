@@ -1,33 +1,10 @@
-# Copyright 2019 Google LLC
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     https://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
-"""A demo that runs object detection on camera frames using OpenCV.
-
-TEST_DATA=../all_models
-
-Run face detection model:
-python3 detect.py \
-  --model ${TEST_DATA}/mobilenet_ssd_v2_face_quant_postprocess_edgetpu.tflite
-
-Run coco model:
-python3 detect.py \
-  --model ${TEST_DATA}/mobilenet_ssd_v2_coco_quant_postprocess_edgetpu.tflite \
-  --labels ${TEST_DATA}/coco_labels.txt
-
-"""
+# Demonstration of face tracking with a camera and optional servo(s)
+# Incorporates sound during particular events
 import argparse
 from enum import Enum
+from sound_controls import play_sound
+import pan_servo as pan_controls
+import yaml
 import collections
 import common
 import cv2
@@ -37,26 +14,13 @@ from PIL import Image
 import imutils
 import re
 import tflite_runtime.interpreter as tflite
-import servoAdafruit as ServoControls
+import servoAdafruit as servo_controls
 import datetime
 import time
 import _thread
 import RPi.GPIO as GPIO
 
 TARGET_ACQUIRED = 'target-acquired.mp3'
-
-sound_last_play = {}
-
-def initCameras(cameras_config):
-    # accounting for the number of threads and cameras_config, setup each camera
-    # camera setup uses its camera_config to determine if it supports, pan and/or tilt (or neither)
-    # pan and tilt depend on a face detected and must move to center the face
-
-
-def play_sound(s):
-    if s not in sound_last_play or (s in sound_last_play and (datetime.datetime.now() - sound_last_play[s]).seconds > 1):
-        os.system('nohup nvlc ' + s + ' --play-and-exit > /dev/null 2>&1 &')
-        sound_last_play[s] = datetime.datetime.now()
 
 global RUNNING
 RUNNING = True
@@ -72,13 +36,13 @@ def ledOn():
 def ledOff():
     GPIO.output(LED_PIN, GPIO.LOW)
 
-def control_servo(servo, servoData):
+def control_servo(servo, servo_data, target_fn):
     time.sleep(1)
     while RUNNING:
-        if servoData['targetCoordinates'] != [-1,-1]:
-            ServoControls.step_toward_target(servo, servoData, servoData['targetCoordinates'], 480, 640) #TODO: Read from cv2
+        if servo_data['target_coordinates'] != [-1,-1]:
+            target_fn(servo, servo_data, servo_data['target_coordinates'], 480, 640) #TODO: Read from cv2
         else:
-            ServoControls.sweep(servo, servoData)
+            servo_controls.sweep_step(servo, servo_data)
             time.sleep(0.01)
 
 Object = collections.namedtuple('Object', ['id', 'score', 'bbox'])
@@ -117,11 +81,13 @@ def get_output(interpreter, score_threshold, top_k, image_scale=1.0):
                       ymin=np.maximum(0.0, ymin),
                       xmax=np.minimum(1.0, xmax),
                       ymax=np.minimum(1.0, ymax)))
-
     return [make(i) for i in range(top_k) if scores[i] >= score_threshold]
 
+def init_servo(name, config):
+    servo, servoData = servo_controls.init(0, **config)
+
 def main():
-    default_model_dir = './' #'../all_models'
+    default_model_dir = './'
     default_model = 'mobilenet_ssd_v2_coco_quant_postprocess_edgetpu.tflite'
     default_labels = 'coco_labels.txt'
     parser = argparse.ArgumentParser()
@@ -131,26 +97,41 @@ def main():
                         default=os.path.join(default_model_dir, default_labels))
     parser.add_argument('--top_k', type=int, default=3,
                         help='number of categories with highest score to display')
-    parser.add_argument('--camera_idx', help='Index of which video source to use. ', default = 0)
-    parser.add_argument('--threshold', type=float, default=0.5,
-                        help='classifier score threshold')
-    parser.add_argument('--min_angle', type=float, default=0.0, help='minimum angle for sweep')
-    parser.add_argument('--max_angle', type=float, default=180.0, help='maximum angle for sweep')
     
     args = parser.parse_args()
-    
-    print('Initializing servo')
-    servo, servoData = ServoControls.init(0, sweepStepTracking = 0.1, minAngle = args.min_angle, maxAngle = args.max_angle) #SERVO_PIN, 50)
-    servoThread = _thread.start_new_thread(control_servo, (servo,servoData))
+
+    with open("config.yaml", 'r') as stream:
+    try:
+        config = yaml.safe_load(stream)
+        ## DEFAULTS## ## TODO: Externalize defauls in separate YAML and merge
+        config['threshold'] = config.get('threshold', 0.5)
+        config['camera'] = config.get('camera', {})
+        config['camera']['index'] = config.get('index', 0)
+    except yaml.YAMLError as exc:
+        print("Unable to read YAML")
+        print(exc)
+
+    print('Initializing servos')
+    if 'pan' in config:
+        print('Initializing pan servo')
+        pan_servo, pan_servo_data = init_servo('pan', config['pan'])
+        pan_servo_thread = _thread.start_new_thread(control_servo, (pan_servo, pan_servo_data, pan_controls.step_toward_target))
+    if 'tilt' in config:
+        print('Initializing tilt servo')
+        tilt_servo, tilt_servo_data = init_servo('tilt', config['tilt'])
+        tilt_servo_thread = _thread.start_new_thread(control_servo, (tilt_servo, tilt_servo_data, tilt_controls.step_toward_target))
+    print('Servos initialized')
 
     print('Loading {} with {} labels.'.format(args.model, args.labels))
     interpreter = common.make_interpreter(args.model)
     interpreter.allocate_tensors()
     labels = load_labels(args.labels)
+    print('labels loaded')
     
 #    cv2.VideoCapture.set(v_c, cv2.CAP_PROP_FPS, 15)
 
-    cap = cv2.VideoCapture(args.camera_idx)
+    print('Capturing first frame for shape')
+    cap = cv2.VideoCapture(config['camera']['index'])
     # Read first frame to get window frame shape
     _, frame = cap.read()
     if frame is None:
@@ -178,7 +159,7 @@ def main():
 
         common.set_input(interpreter, pil_im)
         interpreter.invoke()
-        objs = get_output(interpreter, score_threshold=args.threshold, top_k=args.top_k)
+        objs = get_output(interpreter, score_threshold=config['threshold'], top_k=args.top_k)
         cv2_im = append_objs_to_img(cv2_im, objs, labels)
         
         face = next(filter(lambda a: a.id == 0, objs), None)
@@ -192,7 +173,7 @@ def main():
             x0, y0, x1, y1 = int(x0*width), int(y0*height), int(x1*width), int(y1*height)
     
             lastTargetLost = 0
-            servoData['targetCoordinates'] = [round(abs((x0+(x1))/2)), round(abs((y0+(y1))/2))]
+            servoData['target_coordinates'] = [round(abs((x0+(x1))/2)), round(abs((y0+(y1))/2))]
         else:
             # target may have been lost
             if targetState == TargetState.TRACKING:
@@ -201,7 +182,7 @@ def main():
                 lastTargetLostTime = datetime.datetime.now()
             if targetState == TargetState.LOST and (lastTargetLostTime == None or (datetime.datetime.now() - lastTargetLostTime).seconds > 2):
                 # if lost for over a second, reset targetState back to default
-                servoData['targetCoordinates'] = [-1,-1]
+                servoData['target_coordinates'] = [-1,-1]
                 play_sound('are-still-there.mp3')
                 targetState = TargetState.UNKNOWN
                 lastTargetLostTime = None
