@@ -47,6 +47,12 @@ TARGET_ACQUIRED = 'target-acquired.mp3'
 
 sound_last_play = {}
 
+def initCameras(cameras_config):
+    # accounting for the number of threads and cameras_config, setup each camera
+    # camera setup uses its camera_config to determine if it supports, pan and/or tilt (or neither)
+    # pan and tilt depend on a face detected and must move to center the face
+
+
 def play_sound(s):
     if s not in sound_last_play or (s in sound_last_play and (datetime.datetime.now() - sound_last_play[s]).seconds > 1):
         os.system('nohup nvlc ' + s + ' --play-and-exit > /dev/null 2>&1 &')
