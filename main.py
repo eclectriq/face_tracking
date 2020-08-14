@@ -22,7 +22,7 @@ v_c = cv2.VideoCapture(0)
 GPIO.setup(LED_PIN, GPIO.OUT)
 GPIO.output(LED_PIN, GPIO.LOW)
 
-servo, servoData = servoControls.init(0, sweepStepTracking = 0.5) #SERVO_PIN, 50)
+servo, servoData = servoControls.init(0, sweep_tracking_step = 0.5) #SERVO_PIN, 50)
 
 def ledOn():
     GPIO.output(LED_PIN, GPIO.HIGH)
