@@ -33,7 +33,7 @@ tilt:
   sweep_complete_sleep: 0.5
   sweep_step: 0.5
   sweep_sleep: 0.001
-  sweep_tracking_sleep: 0.001
+  sweep_tracking_sleep: 0.01
 sounds:
   searching: "searching.mp3"
   acquired: "target-acquired.mp3"

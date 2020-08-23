@@ -14,7 +14,6 @@ import os
 from PIL import Image
 import imutils
 import re
-import tflite_runtime.interpreter as tflite
 import servoAdafruit as servo_controls
 import datetime
 import time
@@ -25,17 +24,6 @@ TARGET_ACQUIRED = 'target-acquired.mp3'
 
 global SHARED_STATE
 SHARED_STATE = {"running" : True}
-SERVO_PIN = 40 #33 #12
-LED_PIN = 17
-
-GPIO.setup(LED_PIN, GPIO.OUT)
-GPIO.output(LED_PIN, GPIO.LOW)
-
-def ledOn():
-    GPIO.output(LED_PIN, GPIO.HIGH)
-
-def ledOff():
-    GPIO.output(LED_PIN, GPIO.LOW)
 
 def control_servo(servo, servo_data, target_data, target_fn, on_stop_fn = None):
     time.sleep(1)
@@ -102,7 +90,6 @@ def main():
                         default=os.path.join(default_model_dir, default_labels))
     parser.add_argument('--top_k', type=int, default=3,
                         help='number of categories with highest score to display')
-    
     args = parser.parse_args()
 
     with open('config.yaml', 'r') as stream:
@@ -116,9 +103,9 @@ def main():
         except yaml.YAMLError as exc:
             print('Unable to read YAML')
             print(exc)
-    
+
     target_data = {'target_coordinates': [-1,-1]}
-    
+
     print('Initializing servos')
     if 'pan' in config:
         print('Initializing pan servo')
@@ -140,7 +127,7 @@ def main():
     interpreter.allocate_tensors()
     labels = load_labels(args.labels)
     print('labels loaded')
-    
+
 #    cv2.VideoCapture.set(v_c, cv2.CAP_PROP_FPS, 15)
 
     print('Capturing first frame for shape')
@@ -150,13 +137,13 @@ def main():
     if frame is None:
             raise Exception('Image not found!')
     frameH, frameW, frameChannels = frame.shape
-    
+
     lastTargetLost = None
     lastTargetLostTime = datetime.datetime.now()
     targetState = TargetState.UNKNOWN
-    
+
     play_sound('searching.mp3')
-    
+
     print('Starting video loop')
 
     while cap.isOpened():
@@ -167,7 +154,7 @@ def main():
         frame = cv2.flip(frame, flipCode=-1)
         #frame = imutils.rotate(frame, 90)
         h, w, layers = frame.shape
-        aspect_ratio = w / h    
+        aspect_ratio = w / h
         cv2_im = frame # cv2.resize(frame, (1920, 1080))
 
         cv2_im_rgb = cv2.cvtColor(cv2_im, cv2.COLOR_BGR2RGB)
@@ -177,17 +164,17 @@ def main():
         interpreter.invoke()
         objs = get_output(interpreter, score_threshold=config['threshold'], top_k=args.top_k)
         cv2_im = append_objs_to_img(cv2_im, objs, labels)
-        
+
         face = next(filter(lambda a: a.id == 0, objs), None)
-        
+
         if face != None:
             if targetState == TargetState.UNKNOWN:
                 targetState = TargetState.ACQUIRED
             height, width, channels = cv2_im.shape
-            
+
             x0, y0, x1, y1 = list(face.bbox)
             x0, y0, x1, y1 = int(x0*width), int(y0*height), int(x1*width), int(y1*height)
-    
+
             lastTargetLost = 0
             target_data['target_coordinates'] = [round(abs((x0+(x1))/2)), round(abs((y0+(y1))/2))]
         else:
@@ -202,11 +189,11 @@ def main():
                 play_sound('are-still-there.mp3')
                 targetState = TargetState.UNKNOWN
                 lastTargetLostTime = None
-            
+
         if targetState == TargetState.ACQUIRED:
             play_sound(TARGET_ACQUIRED)
             targetState = TargetState.TRACKING
-        
+
         cv2.imshow('frame', cv2_im)
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
