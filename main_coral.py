@@ -19,8 +19,10 @@ import datetime
 import time
 import _thread
 import RPi.GPIO as GPIO
+from functools import partial
 
-TARGET_ACQUIRED = 'target-acquired.mp3'
+# Seed play_sound path so not to repeat it
+play_sound = partial(play_sound, os.path.join("media", "audio"))
 
 global SHARED_STATE
 SHARED_STATE = {"running" : True}
@@ -142,7 +144,7 @@ def main():
     lastTargetLostTime = datetime.datetime.now()
     targetState = TargetState.UNKNOWN
 
-    play_sound('searching.mp3')
+    play_sound(config['sounds']['searching'])
 
     print('Starting video loop')
 
@@ -186,12 +188,12 @@ def main():
             if targetState == TargetState.LOST and (lastTargetLostTime == None or (datetime.datetime.now() - lastTargetLostTime).seconds > 2):
                 # if lost for over a second, reset targetState back to default
                 target_data['target_coordinates'] = [-1,-1]
-                play_sound('are-still-there.mp3')
+                play_sound(config['sounds']['target_lost'])
                 targetState = TargetState.UNKNOWN
                 lastTargetLostTime = None
 
         if targetState == TargetState.ACQUIRED:
-            play_sound(TARGET_ACQUIRED)
+            play_sound(config['sounds']['target_acquired'])
             targetState = TargetState.TRACKING
 
         cv2.imshow('frame', cv2_im)

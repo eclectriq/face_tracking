@@ -36,5 +36,5 @@ tilt:
   sweep_tracking_sleep: 0.01
 sounds:
   searching: "searching.mp3"
-  acquired: "target-acquired.mp3"
-  lost: "are-still-there.mp3"
+  target_acquired: "target-acquired.mp3"
+  target_lost: "are-still-there.mp3"
