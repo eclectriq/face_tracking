@@ -35,8 +35,10 @@ def control_servo(servo, servo_data, target_data, target_fn, on_stop_fn = None):
         else:
             servo_controls.sweep_step(servo, servo_data)
     if on_stop_fn != None:
+        print('Calling on_stop_fn')
         on_stop_fn(servo, servo_data)
     print('No longer running servo {}'.format(servo_data['name']))
+    
 
 Object = collections.namedtuple('Object', ['id', 'score', 'bbox'])
 class TargetState(Enum):
@@ -102,6 +104,7 @@ def main():
             config['threshold'] = config.get('threshold', 0.5)
             config['camera'] = config.get('camera', {})
             config['camera']['index'] = config.get('index', 0)
+            config['camera']['orientation'] = config.get('orientation', 0)
         except yaml.YAMLError as exc:
             print('Unable to read YAML')
             print(exc)
@@ -153,10 +156,13 @@ def main():
         if not ret:
             break
         # TODO: Use config orientation
-        frame = cv2.flip(frame, flipCode=-1)
+        # frame = cv2.flip(frame, 0)
+        frame = cv2.flip(frame, 1)
+        
         #frame = imutils.rotate(frame, 90)
-        h, w, layers = frame.shape
+        h, w, layers = frame.shape 
         aspect_ratio = w / h
+        # print('{} {} {}'.format(h, w, aspect_ratio))
         cv2_im = frame # cv2.resize(frame, (1920, 1080))
 
         cv2_im_rgb = cv2.cvtColor(cv2_im, cv2.COLOR_BGR2RGB)
@@ -178,6 +184,7 @@ def main():
             x0, y0, x1, y1 = int(x0*width), int(y0*height), int(x1*width), int(y1*height)
 
             lastTargetLost = 0
+            # Set target coordinates based on mid-point of the axis of bounding box
             target_data['target_coordinates'] = [round(abs((x0+(x1))/2)), round(abs((y0+(y1))/2))]
         else:
             # target may have been lost
@@ -185,7 +192,7 @@ def main():
                 targetState = TargetState.LOST
                 # track lost time
                 lastTargetLostTime = datetime.datetime.now()
-            if targetState == TargetState.LOST and (lastTargetLostTime == None or (datetime.datetime.now() - lastTargetLostTime).seconds > 2):
+            if targetState == TargetState.LOST and (lastTargetLostTime == None or (datetime.datetime.now() - lastTargetLostTime).seconds > 10):
                 # if lost for over a second, reset targetState back to default
                 target_data['target_coordinates'] = [-1,-1]
                 play_sound(config['sounds']['target_lost'])
@@ -196,7 +203,9 @@ def main():
             play_sound(config['sounds']['target_acquired'])
             targetState = TargetState.TRACKING
 
-        cv2.imshow('frame', cv2_im)
+        if config['camera']['display']:
+            cv2.imshow('frame', cv2_im)
+
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
