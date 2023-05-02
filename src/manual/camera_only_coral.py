@@ -33,12 +33,7 @@ import cv2
 import numpy as np
 import os
 from PIL import Image
-import imutils
 import re
-import tflite_runtime.interpreter as tflite
-import datetime
-import time
-import _thread
 
 global RUNNING
 RUNNING = True
@@ -78,7 +73,7 @@ def get_output(interpreter, score_threshold, top_k, image_scale=1.0):
     return [make(i) for i in range(top_k) if scores[i] >= score_threshold]
 
 def main():
-    default_model_dir = './' #'../all_models'
+    default_model_dir = '../../'  #'../all_models'
     default_model = 'mobilenet_ssd_v2_coco_quant_postprocess_edgetpu.tflite'
     default_labels = 'coco_labels.txt'
     parser = argparse.ArgumentParser()

@@ -16,7 +16,7 @@ pan:
   angle: 90
   # angle to rotate to upon shutting down
   shutdown_angle: 60
-  # time to sleep when at the end of a sweep (at min angle and max angle)
+  # time to sleep when at the end of a sweep (at min angle and max angle) NOT IMPLEMENTED
   sweep_complete_sleep: 1
   # how much to step during sweep loop
   sweep_step: 0.5
@@ -24,7 +24,7 @@ pan:
   sweep_sleep: 0.0001
   # how much to step during tracking loop
   sweep_tracking_step: 0.1
-  # how much time to sleep in between tracking seps
+  # how much time to sleep in between tracking steps
   sweep_tracking_sleep: 0.01
 tilt:
   channel: 4

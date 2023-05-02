@@ -3,6 +3,7 @@ import datetime
 
 sound_last_play = {}
 
+
 def play_sound(path, s):
     s = os.path.join(path, s)
     if s not in sound_last_play or (s in sound_last_play and (datetime.datetime.now() - sound_last_play[s]).seconds > 1):
