@@ -44,7 +44,7 @@ def control_servo(servo, servo_data, target_data, target_fn, on_stop_fn=None):
 Object = collections.namedtuple('Object', ['id', 'score', 'bbox'])
 
 
-class target_state(Enum):
+class TargetState(Enum):
     UNKNOWN = 1
     ACQUIRED = 2
     TRACKING = 3
@@ -93,8 +93,6 @@ def init_servo(name, config):
 
 
 def main():
-    nonlocal target_state
-
     default_model_dir = '../'
     default_model = 'mobilenet_ssd_v2_coco_quant_postprocess_edgetpu.tflite'
     default_labels = 'coco_labels.txt'
@@ -161,7 +159,7 @@ def main():
 
     last_target_lost = None
     last_target_lost_time = datetime.datetime.now()
-    target_state = target_state.UNKNOWN
+    target_state = TargetState.UNKNOWN
 
     play_sound(config['sounds']['searching'])
 
@@ -192,8 +190,8 @@ def main():
         face = next(filter(lambda a: a.id == 0, objs), None)
 
         if face is not None:
-            if target_state == target_state.UNKNOWN:
-                target_state = target_state.ACQUIRED
+            if target_state == TargetState.UNKNOWN:
+                target_state = TargetState.ACQUIRED
             height, width, channels = cv2_im.shape
 
             x0, y0, x1, y1 = list(face.bbox)
@@ -204,21 +202,21 @@ def main():
             target_data['target_coordinates'] = [round(abs((x0 + (x1)) / 2)), round(abs((y0 + (y1)) / 2))]
         else:
             # target may have been lost
-            if target_state == target_state.TRACKING:
-                target_state = target_state.LOST
+            if target_state == TargetState.TRACKING:
+                target_state = TargetState.LOST
                 # track lost time
                 last_target_lost_time = datetime.datetime.now()
-            if target_state == target_state.LOST and (
+            if target_state == TargetState.LOST and (
                     last_target_lost_time is None or (datetime.datetime.now() - last_target_lost_time).seconds > 10):
                 # if lost for over a second, reset target_state back to default
                 target_data['target_coordinates'] = [-1, -1]
                 play_sound(config['sounds']['target_lost'])
-                target_state = target_state.UNKNOWN
+                target_state = TargetState.UNKNOWN
                 last_target_lost_time = None
 
-        if target_state == target_state.ACQUIRED:
+        if target_state == TargetState.ACQUIRED:
             play_sound(config['sounds']['target_acquired'])
-            target_state = target_state.TRACKING
+            target_state = TargetState.TRACKING
 
         if config['camera']['display']:
             cv2.imshow('frame', cv2_im)
