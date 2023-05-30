@@ -56,7 +56,7 @@ def step(servo, servo_data):
     return servo, servo_data
 
 
-def step_toward_target(servo, servo_data, current, target, target_give=25):
+def step_toward_target(servo, servo_data, current, target, target_give=50):
     """
     Request one step towards the target given the current position.
 
