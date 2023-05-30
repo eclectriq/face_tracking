@@ -20,76 +20,20 @@ import tpu
 import servoAdafruit
 from functools import partial
 
-
 # Seed play_sound path so not to repeat it
 play_sound = partial(play_sound, os.path.join("../media", "audio"))
 
 global SHARED_STATE
 SHARED_STATE = {"running": True}
 
-
-def control_servo(servo, servo_data, target_data, target_fn, on_stop_fn=None):
-    time.sleep(1)
-    while SHARED_STATE['running']:
-        if target_data['target_coordinates'] != [-1, -1]:
-            target_fn(servo, servo_data, target_data['target_coordinates'], 480, 640)  # TODO: Read from cv2
-        else:
-            servo_controls.step(servo, servo_data)
-    if on_stop_fn is not None:
-        print('Calling on_stop_fn')
-        on_stop_fn(servo, servo_data)
-    print('No longer running servo {}'.format(servo_data['name']))
-
-
 Object = collections.namedtuple('Object', ['id', 'score', 'bbox'])
 
 
-class TargetState(Enum):
+class TrackingState(Enum):
     UNKNOWN = 1
-    ACQUIRED = 2
+    NOT_TRACKING = 2
     TRACKING = 3
     LOST = 4
-
-
-def load_labels(path):
-    p = re.compile(r'\s*(\d+)(.+)')
-    with open(path, 'r', encoding='utf-8') as f:
-        lines = (p.match(line).groups() for line in f.readlines())
-        return {int(num): text.strip() for num, text in lines}
-
-
-class BBox(collections.namedtuple('BBox', ['xmin', 'ymin', 'xmax', 'ymax'])):
-    """Bounding box.
-    Represents a rectangle which sides are either vertical or horizontal, parallel
-    to the x or y axis.
-    """
-    __slots__ = ()
-
-
-def get_output(interpreter, score_threshold, top_k, image_scale=1.0):
-    """Returns list of detected objects."""
-    boxes = tpu.output_tensor(interpreter, 0)
-    class_ids = tpu.output_tensor(interpreter, 1)
-    scores = tpu.output_tensor(interpreter, 2)
-    count = int(tpu.output_tensor(interpreter, 3))
-
-    def make(i):
-        ymin, xmin, ymax, xmax = boxes[i]
-        return Object(
-            id=int(class_ids[i]),
-            score=scores[i],
-            bbox=BBox(xmin=np.maximum(0.0, xmin),
-                      ymin=np.maximum(0.0, ymin),
-                      xmax=np.minimum(1.0, xmax),
-                      ymax=np.minimum(1.0, ymax)))
-
-    return [make(i) for i in range(top_k) if scores[i] >= score_threshold]
-
-
-def init_servo(name, config):
-    print('Initializing servo {} with config {}'.format(name, config))
-    servo, servo_data = servo_controls.init(lambda: servoAdafruit.init(config['channel']), name, **config)
-    return servo, servo_data
 
 
 def main():
@@ -159,11 +103,13 @@ def main():
 
     last_target_lost = None
     last_target_lost_time = datetime.datetime.now()
-    target_state = TargetState.UNKNOWN
+    tracking_state = TrackingState.UNKNOWN
 
     play_sound(config['sounds']['searching'])
 
     print('Starting video loop')
+
+    tracking_state = TrackingState.NOT_TRACKING
 
     while cap.isOpened():
         ret, frame = cap.read()
@@ -190,8 +136,12 @@ def main():
         face = next(filter(lambda a: a.id == 0, objs), None)
 
         if face is not None:
-            if target_state == TargetState.UNKNOWN:
-                target_state = TargetState.ACQUIRED
+            if tracking_state == TrackingState.NOT_TRACKING:
+                play_sound(config['sounds']['target_acquired'])
+                tracking_state = TrackingState.TRACKING
+            elif tracking_state == TrackingState.LOST:
+                tracking_state = TrackingState.TRACKING
+
             height, width, channels = cv2_im.shape
 
             x0, y0, x1, y1 = list(face.bbox)
@@ -202,21 +152,17 @@ def main():
             target_data['target_coordinates'] = [round(abs((x0 + (x1)) / 2)), round(abs((y0 + (y1)) / 2))]
         else:
             # target may have been lost
-            if target_state == TargetState.TRACKING:
-                target_state = TargetState.LOST
+            if tracking_state == TrackingState.TRACKING:
+                tracking_state = TrackingState.LOST
                 # track lost time
                 last_target_lost_time = datetime.datetime.now()
-            if target_state == TargetState.LOST and (
+            if tracking_state == TrackingState.LOST and (
                     last_target_lost_time is None or (datetime.datetime.now() - last_target_lost_time).seconds > 10):
-                # if lost for over a second, reset target_state back to default
+                # if lost for over a second, reset tracking_state back to default
                 target_data['target_coordinates'] = [-1, -1]
                 play_sound(config['sounds']['target_lost'])
-                target_state = TargetState.UNKNOWN
+                tracking_state = TrackingState.UNKNOWN
                 last_target_lost_time = None
-
-        if target_state == TargetState.ACQUIRED:
-            play_sound(config['sounds']['target_acquired'])
-            target_state = TargetState.TRACKING
 
         if config['camera']['display']:
             cv2.imshow('frame', cv2_im)
@@ -244,6 +190,60 @@ def append_objs_to_img(cv2_im, objs, labels):
         cv2_im = cv2.putText(cv2_im, label, (x0, y0 + 30),
                              cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 0, 0), 2)
     return cv2_im
+
+
+def control_servo(servo, servo_data, target_data, target_fn, on_stop_fn=None):
+    time.sleep(1)
+    while SHARED_STATE['running']:
+        if target_data['target_coordinates'] != [-1, -1]:
+            target_fn(servo, servo_data, target_data['target_coordinates'], 480, 640)  # TODO: Read from cv2
+        else:
+            servo_controls.step(servo, servo_data)
+    if on_stop_fn is not None:
+        print('Calling on_stop_fn')
+        on_stop_fn(servo, servo_data)
+    print('No longer running servo {}'.format(servo_data['name']))
+
+
+def load_labels(path):
+    p = re.compile(r'\s*(\d+)(.+)')
+    with open(path, 'r', encoding='utf-8') as f:
+        lines = (p.match(line).groups() for line in f.readlines())
+        return {int(num): text.strip() for num, text in lines}
+
+
+class BBox(collections.namedtuple('BBox', ['xmin', 'ymin', 'xmax', 'ymax'])):
+    """Bounding box.
+    Represents a rectangle which sides are either vertical or horizontal, parallel
+    to the x or y axis.
+    """
+    __slots__ = ()
+
+
+def get_output(interpreter, score_threshold, top_k, image_scale=1.0):
+    """Returns list of detected objects."""
+    boxes = tpu.output_tensor(interpreter, 0)
+    class_ids = tpu.output_tensor(interpreter, 1)
+    scores = tpu.output_tensor(interpreter, 2)
+    count = int(tpu.output_tensor(interpreter, 3))
+
+    def make(i):
+        ymin, xmin, ymax, xmax = boxes[i]
+        return Object(
+            id=int(class_ids[i]),
+            score=scores[i],
+            bbox=BBox(xmin=np.maximum(0.0, xmin),
+                      ymin=np.maximum(0.0, ymin),
+                      xmax=np.minimum(1.0, xmax),
+                      ymax=np.minimum(1.0, ymax)))
+
+    return [make(i) for i in range(top_k) if scores[i] >= score_threshold]
+
+
+def init_servo(name, config):
+    print('Initializing servo {} with config {}'.format(name, config))
+    servo, servo_data = servo_controls.init(lambda: servoAdafruit.init(config['channel']), name, **config)
+    return servo, servo_data
 
 
 if __name__ == '__main__':
