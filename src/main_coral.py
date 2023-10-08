@@ -117,7 +117,7 @@ def main():
             break
         # TODO: Use config orientation
         # frame = cv2.flip(frame, 0)
-        frame = cv2.flip(frame, 1)
+        frame = cv2.flip(frame, config['camera']['orientation'])
 
         # frame = imutils.rotate(frame, 90)
         h, w, layers = frame.shape
@@ -157,11 +157,12 @@ def main():
                 # track lost time
                 last_target_lost_time = datetime.datetime.now()
             if tracking_state == TrackingState.LOST and (
-                    last_target_lost_time is None or (datetime.datetime.now() - last_target_lost_time).seconds > 10):
+                    last_target_lost_time is None or
+                    (datetime.datetime.now() - last_target_lost_time).seconds > 3):
                 # if lost for over a second, reset tracking_state back to default
                 target_data['target_coordinates'] = [-1, -1]
                 play_sound(config['sounds']['target_lost'])
-                tracking_state = TrackingState.UNKNOWN
+                tracking_state = TrackingState.NOT_TRACKING
                 last_target_lost_time = None
 
         if config['camera']['display']:
